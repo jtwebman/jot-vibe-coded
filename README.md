@@ -16,7 +16,7 @@ It took about 4 minutes. It has zero dependencies (Node 22+ with the built-in `n
 npm start                  # http://localhost:3000  (no install step)
 ADMIN=<username> npm start # make an existing account the admin (fixed version)
 npm test                   # 10 checks
-git checkout HEAD~10       # the original, as vibe-coded
+git checkout $(git rev-list --max-parents=0 HEAD)   # the original, as vibe-coded
 ```
 
 For learning only. It's a small demo, not a hardened product.
