@@ -34,8 +34,8 @@ test('auth, note privacy, sharing, uploads, admin', async (t) => {
   assert.equal((await login('bob', 'wrong-pass')).status, 401);
   assert.equal((await login('bob', 'password123')).status, 303);
 
-  // first user is admin, others aren't
-  assert.equal((await req('/admin', alice)).status, 200);
+  // nobody is admin unless the operator names them (see #2)
+  assert.equal((await req('/admin', alice)).status, 403);
   assert.equal((await req('/admin', bob)).status, 403);
   assert.equal((await req('/admin')).status, 303);
 
@@ -69,4 +69,14 @@ test('#1 a malformed request path gets a 400 and the server keeps running', asyn
     http.get({ host: '127.0.0.1', port: PORT, path: '//[' }, (r) => { r.resume(); resolve(r.statusCode); }).on('error', reject));
   assert.equal(status, 400);
   assert.equal((await req('/')).status, 200);
+});
+
+test('#2 signing up first does not make you admin; only ADMIN=<username> does', async (t) => {
+  const fresh = await boot(t);
+  const mallory = await fresh.signup('mallory'), owner = await fresh.signup('owner');
+  assert.equal((await fresh.req('/admin', mallory)).status, 403, 'first signup must not be admin');
+  fresh.kill();
+  const restarted = await boot(t, { ADMIN: 'owner' }, fresh.DB);
+  assert.equal((await restarted.req('/admin', owner)).status, 200);
+  assert.equal((await restarted.req('/admin', mallory)).status, 403);
 });

@@ -32,6 +32,8 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
 `);
+// The operator names the admin; signing up never grants it. Sign up first, then restart with ADMIN=<username>.
+db.prepare('UPDATE users SET is_admin = (username = ?)').run(process.env.ADMIN ?? '');
 
 // ---------- security helpers ----------
 const hashPassword = (pw) => {
@@ -238,9 +240,7 @@ const routes = [
       : db.prepare('SELECT 1 FROM users WHERE username = ?').get(username) ? 'That username is taken.'
       : null;
     if (error) return send(res, authPage('signup', error, username), 400);
-    // The very first account becomes the admin.
-    const { lastInsertRowid } = db.prepare('INSERT INTO users (username, password, is_admin) VALUES (?, ?, (SELECT COUNT(*) = 0 FROM users))')
-      .run(username, hashPassword(password));
+    const { lastInsertRowid } = db.prepare('INSERT INTO users (username, password) VALUES (?, ?)').run(username, hashPassword(password));
     startSession(res, lastInsertRowid);
   }],
 
@@ -351,4 +351,4 @@ http.createServer(async (req, res) => {
     if (!res.headersSent) send(res, errorPage(user, e.status || 500, e.status ? e.message : 'Something went wrong.'), e.status || 500);
     else res.end();
   }
-}).listen(PORT, () => console.log(`Jot running at http://localhost:${PORT}`));
+}).listen(PORT, () => console.log(`Jot running at http://localhost:${PORT}${process.env.ADMIN ? '' : ' (no admin: sign up, then restart with ADMIN=<username>)'}`));
