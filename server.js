@@ -336,9 +336,10 @@ http.createServer(async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'no-referrer'); // keeps share tokens out of Referer headers
-  const { pathname } = new URL(req.url, 'http://localhost');
   let user;
   try {
+    const pathname = URL.parse(req.url, 'http://localhost')?.pathname;
+    if (!pathname) throw httpError(400, 'Bad request.');
     user = currentUser(req);
     for (const [method, re, handler] of routes) {
       const m = req.method === method && pathname.match(re);

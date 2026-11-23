@@ -1,6 +1,7 @@
 // End-to-end checks of the security-relevant paths. Run: npm test
 // Each test boots its own server on a fresh database, so state (sessions, login limits) never leaks between tests.
 import { test } from 'node:test';
+import http from 'node:http';
 import net from 'node:net';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -59,4 +60,13 @@ test('auth, note privacy, sharing, uploads, admin', async (t) => {
   // logout kills the session
   await req('/logout', bob, new URLSearchParams());
   assert.equal((await req('/profile', bob)).status, 303);
+});
+
+test('#1 a malformed request path gets a 400 and the server keeps running', async (t) => {
+  const { PORT, req } = await boot(t);
+  // fetch normalizes URLs, so send the raw request line the audit used: GET //[
+  const status = await new Promise((resolve, reject) =>
+    http.get({ host: '127.0.0.1', port: PORT, path: '//[' }, (r) => { r.resume(); resolve(r.statusCode); }).on('error', reject));
+  assert.equal(status, 400);
+  assert.equal((await req('/')).status, 200);
 });
