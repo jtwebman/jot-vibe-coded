@@ -1,5 +1,7 @@
-// One end-to-end check of the security-relevant paths. Run: npm test
-import { test, before, after } from 'node:test';
+// End-to-end checks of the security-relevant paths. Run: npm test
+// Each test boots its own server on a fresh database, so state (sessions, login limits) never leaks between tests.
+import { test } from 'node:test';
+import net from 'node:net';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
@@ -7,27 +9,29 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-const PORT = 3999, base = `http://localhost:${PORT}`;
-const DB = join(mkdtempSync(join(tmpdir(), 'jot-')), 'test.db');
-let server;
-before(async () => {
-  server = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server.js'], { env: { ...process.env, PORT, DB }, stdio: ['ignore', 'pipe', 'inherit'] });
+const freePort = () => new Promise((r) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => r(port)); }); });
+const boot = async (t, env = {}, DB = join(mkdtempSync(join(tmpdir(), 'jot-')), 'test.db')) => {
+  const PORT = await freePort(), base = `http://127.0.0.1:${PORT}`;
+  const server = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server.js'], { env: { ...process.env, PORT, DB, ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
+  t.after(() => server.kill());
   await new Promise((r) => server.stdout.once('data', r));
-});
-after(() => server.kill());
-
-const req = (path, cookie, body) => fetch(base + path, { method: body ? 'POST' : 'GET', headers: cookie ? { cookie } : {}, body, redirect: 'manual' });
-const signup = async (username) => {
-  const r = await req('/signup', null, new URLSearchParams({ username, password: 'password123' }));
-  assert.equal(r.status, 303);
-  return r.headers.get('set-cookie').split(';')[0];
+  const req = (path, cookie, body, headers = {}) =>
+    fetch(base + path, { method: body ? 'POST' : 'GET', headers: { ...headers, ...(cookie ? { cookie } : {}) }, body, redirect: 'manual' });
+  const signup = async (username) => {
+    const r = await req('/signup', null, new URLSearchParams({ username, password: 'password123' }));
+    assert.equal(r.status, 303);
+    return r.headers.get('set-cookie').split(';')[0];
+  };
+  const login = (username, password) => req('/login', null, new URLSearchParams({ username, password }));
+  return { PORT, DB, base, req, signup, login, kill: () => server.kill() };
 };
 
-test('auth, note privacy, sharing, uploads, admin', async () => {
+test('auth, note privacy, sharing, uploads, admin', async (t) => {
+  const { DB, req, signup, login } = await boot(t);
   const alice = await signup('alice'), bob = await signup('bob');
   assert.equal((await req('/signup', null, new URLSearchParams({ username: 'BOB', password: 'password123' }))).status, 400, 'usernames are case-insensitive unique');
-  assert.equal((await req('/login', null, new URLSearchParams({ username: 'bob', password: 'wrong-pass' }))).status, 401);
-  assert.equal((await req('/login', null, new URLSearchParams({ username: 'bob', password: 'password123' }))).status, 303);
+  assert.equal((await login('bob', 'wrong-pass')).status, 401);
+  assert.equal((await login('bob', 'password123')).status, 303);
 
   // first user is admin, others aren't
   assert.equal((await req('/admin', alice)).status, 200);
