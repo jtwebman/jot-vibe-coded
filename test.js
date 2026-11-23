@@ -46,7 +46,8 @@ test('auth, note privacy, sharing, uploads, admin', async (t) => {
   await req(`/notes/${note.id}/toggle`, alice, new URLSearchParams());
   assert.equal((await req(`/n/${note.token}`)).status, 404, 'non-owner cannot share');
   await req(`/notes/${note.id}/toggle`, bob, new URLSearchParams());
-  const shared = await req(`/n/${note.token}`);
+  const { token } = new DatabaseSync(DB).prepare('SELECT token FROM notes').get();
+  const shared = await req(`/n/${token}`);
   assert.equal(shared.status, 200);
   const page = await shared.text();
   assert.ok(page.includes('&#60;script&#62;x') && !page.includes('<script>x'));
@@ -110,4 +111,19 @@ test('#4 a logged-in POST from another origin is refused', async (t) => {
   assert.equal((await post('csrf-c', { origin: 'http://127.0.0.1:4124' })).status, 403, 'browser that sends only Origin');
   assert.ok(!(await (await req('/', bob)).text()).includes('csrf-'), 'no note was planted');
   assert.equal((await post('mine', { 'sec-fetch-site': 'same-origin', origin: base })).status, 303, 'the app itself still works');
+});
+
+test('#5 making a note private kills its link for good, even after re-sharing', async (t) => {
+  const { req, signup } = await boot(t);
+  const bob = await signup('bob');
+  await req('/notes', bob, new URLSearchParams({ body: 'hi', shared: 'on' }));
+  const home = async () => (await req('/', bob)).text();
+  const shareLink = async () => (await home()).match(/href="(\/n\/[\w-]+)"/)[1];
+  const toggle = `/notes/${(await home()).match(/\/notes\/(\d+)\/toggle/)[1]}/toggle`;
+  const oldLink = await shareLink();
+  assert.equal((await req(oldLink)).status, 200);
+  await req(toggle, bob, new URLSearchParams()); // private
+  await req(toggle, bob, new URLSearchParams()); // shared again
+  assert.equal((await req(await shareLink())).status, 200);
+  assert.equal((await req(oldLink)).status, 404);
 });

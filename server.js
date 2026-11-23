@@ -289,8 +289,9 @@ const routes = [
   })],
 
   // Ownership is enforced in SQL: you can only touch rows where user_id is you.
+  // A fresh token on every toggle means a link, once revoked, never works again.
   ['POST', /^\/notes\/(\d+)\/toggle$/, loggedIn(({ res, user, params: [id] }) => {
-    db.prepare('UPDATE notes SET shared = 1 - shared WHERE id = ? AND user_id = ?').run(id, user.id);
+    db.prepare('UPDATE notes SET shared = 1 - shared, token = ? WHERE id = ? AND user_id = ?').run(token(), id, user.id);
     redirect(res, '/');
   })],
 
