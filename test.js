@@ -1,0 +1,58 @@
+// One end-to-end check of the security-relevant paths. Run: npm test
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+
+const PORT = 3999, base = `http://localhost:${PORT}`;
+const DB = join(mkdtempSync(join(tmpdir(), 'jot-')), 'test.db');
+let server;
+before(async () => {
+  server = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server.js'], { env: { ...process.env, PORT, DB }, stdio: ['ignore', 'pipe', 'inherit'] });
+  await new Promise((r) => server.stdout.once('data', r));
+});
+after(() => server.kill());
+
+const req = (path, cookie, body) => fetch(base + path, { method: body ? 'POST' : 'GET', headers: cookie ? { cookie } : {}, body, redirect: 'manual' });
+const signup = async (username) => {
+  const r = await req('/signup', null, new URLSearchParams({ username, password: 'password123' }));
+  assert.equal(r.status, 303);
+  return r.headers.get('set-cookie').split(';')[0];
+};
+
+test('auth, note privacy, sharing, uploads, admin', async () => {
+  const alice = await signup('alice'), bob = await signup('bob');
+  assert.equal((await req('/signup', null, new URLSearchParams({ username: 'BOB', password: 'password123' }))).status, 400, 'usernames are case-insensitive unique');
+  assert.equal((await req('/login', null, new URLSearchParams({ username: 'bob', password: 'wrong-pass' }))).status, 401);
+  assert.equal((await req('/login', null, new URLSearchParams({ username: 'bob', password: 'password123' }))).status, 303);
+
+  // first user is admin, others aren't
+  assert.equal((await req('/admin', alice)).status, 200);
+  assert.equal((await req('/admin', bob)).status, 403);
+  assert.equal((await req('/admin')).status, 303);
+
+  // private note is not reachable by link; others can't toggle it; output is escaped
+  await req('/notes', bob, new URLSearchParams({ body: '<script>x</script>' }));
+  const note = new DatabaseSync(DB).prepare('SELECT id, token FROM notes').get();
+  assert.equal((await req(`/n/${note.token}`)).status, 404);
+  await req(`/notes/${note.id}/toggle`, alice, new URLSearchParams());
+  assert.equal((await req(`/n/${note.token}`)).status, 404, 'non-owner cannot share');
+  await req(`/notes/${note.id}/toggle`, bob, new URLSearchParams());
+  const shared = await req(`/n/${note.token}`);
+  assert.equal(shared.status, 200);
+  const page = await shared.text();
+  assert.ok(page.includes('&#60;script&#62;x') && !page.includes('<script>x'));
+
+  // uploads: magic bytes decide, not the filename/content-type
+  const upload = (bytes, name) => { const f = new FormData(); f.append('avatar', new Blob([bytes], { type: 'image/png' }), name); return req('/profile', bob, f); };
+  assert.equal((await upload(Buffer.from('<svg onload=alert(1)>'), 'x.png')).status, 400);
+  assert.equal((await upload(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]), 'a.png')).status, 303);
+  assert.equal((await req('/avatar/2')).headers.get('content-type'), 'image/png');
+
+  // logout kills the session
+  await req('/logout', bob, new URLSearchParams());
+  assert.equal((await req('/profile', bob)).status, 303);
+});
