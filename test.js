@@ -100,3 +100,14 @@ test('#3 password hashing does not stall other requests', async (t) => {
   assert.equal(page.status, 200);
   assert.ok(doneBeforePage < 20, `GET /login waited behind ${doneBeforePage} of 40 password hashes`);
 });
+
+test('#4 a logged-in POST from another origin is refused', async (t) => {
+  const { base, req, signup } = await boot(t);
+  const bob = await signup('bob');
+  const post = (body, headers) => req('/notes', bob, new URLSearchParams({ body }), headers);
+  assert.equal((await post('csrf-a', { 'sec-fetch-site': 'same-site', origin: 'http://127.0.0.1:4124' })).status, 403, 'page on another local port');
+  assert.equal((await post('csrf-b', { 'sec-fetch-site': 'cross-site' })).status, 403);
+  assert.equal((await post('csrf-c', { origin: 'http://127.0.0.1:4124' })).status, 403, 'browser that sends only Origin');
+  assert.ok(!(await (await req('/', bob)).text()).includes('csrf-'), 'no note was planted');
+  assert.equal((await post('mine', { 'sec-fetch-site': 'same-origin', origin: base })).status, 303, 'the app itself still works');
+});

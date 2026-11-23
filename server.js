@@ -57,6 +57,12 @@ const imageType = (b) =>
   : b.subarray(0, 4).toString() === 'RIFF' && b.subarray(8, 12).toString() === 'WEBP' ? 'image/webp'
   : null;
 
+// CSRF guard. SameSite=Lax still lets same-site pages (another port, a sibling subdomain) post with our cookie.
+// Browsers send Sec-Fetch-Site; older ones send only Origin. Neither header means no browser is involved (curl).
+const crossOrigin = ({ headers: h }) => h['sec-fetch-site']
+  ? !['same-origin', 'none'].includes(h['sec-fetch-site'])
+  : h.origin !== undefined && URL.parse(h.origin)?.host !== h.host;
+
 const httpError = (status, message) => Object.assign(new Error(message), { status });
 
 // Parses urlencoded and multipart bodies via the built-in Fetch Response, with a hard size cap.
@@ -356,6 +362,7 @@ http.createServer(async (req, res) => {
   try {
     const pathname = URL.parse(req.url, 'http://localhost')?.pathname;
     if (!pathname) throw httpError(400, 'Bad request.');
+    if (req.method === 'POST' && crossOrigin(req)) throw httpError(403, 'That request came from another site.');
     user = currentUser(req);
     for (const [method, re, handler] of routes) {
       const m = req.method === method && pathname.match(re);
