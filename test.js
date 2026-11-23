@@ -127,3 +127,13 @@ test('#5 making a note private kills its link for good, even after re-sharing', 
   assert.equal((await req(await shareLink())).status, 200);
   assert.equal((await req(oldLink)).status, 404);
 });
+
+test('#6 a failed login takes as long for an unknown user as for a real one', async (t) => {
+  const { signup, login } = await boot(t);
+  await signup('bob');
+  const time = async (username) => { const t0 = performance.now(); assert.equal((await login(username, 'wrongwrong')).status, 401); return performance.now() - t0; };
+  const real = [], unknown = [];
+  for (let i = 0; i < 5; i++) { real.push(await time('bob')); unknown.push(await time(`nobody${i}`)); } // 10 failures: the #3 limit
+  const median = (a) => a.sort((x, y) => x - y)[2];
+  assert.ok(median(unknown) > median(real) / 3, `unknown user ${median(unknown).toFixed(1)} ms vs real user ${median(real).toFixed(1)} ms`);
+});

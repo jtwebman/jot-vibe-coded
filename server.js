@@ -47,6 +47,7 @@ const checkPassword = async (pw, stored) => {
   const [salt, hash] = stored.split(':');
   return timingSafeEqual(await scrypt(pw, Buffer.from(salt, 'hex'), 64), Buffer.from(hash, 'hex'));
 };
+const DUMMY_HASH = await hashPassword(randomBytes(16).toString('hex'));
 const token = () => randomBytes(18).toString('base64url');
 
 // Sniff the real type from magic bytes; never trust the client's content-type. No SVG (can carry scripts).
@@ -266,7 +267,8 @@ const routes = [
     const f = await readForm(req);
     const username = field(f, 'username'), password = String(f.get('password') ?? '');
     const u = db.prepare('SELECT id, password FROM users WHERE username = ?').get(username);
-    if (!u || !(await checkPassword(password, u.password))) {
+    // Unknown users are checked against a dummy hash, so response time doesn't reveal which usernames exist.
+    if (!(await checkPassword(password, u?.password ?? DUMMY_HASH)) || !u) {
       for (const [k, v] of loginFails) if (v.until <= now) loginFails.delete(k);
       loginFails.set(ip, { ...fails, count: fails.count + 1 });
       return send(res, authPage('login', 'Wrong username or password.', username), 401);
