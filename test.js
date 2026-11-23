@@ -87,3 +87,16 @@ test('#3 after 10 failed logins, even the right password is refused', async (t) 
   for (let i = 0; i < 10; i++) assert.equal((await login('bob', `guess${i}`)).status, 401);
   assert.equal((await login('bob', 'password123')).status, 429);
 });
+
+test('#3 password hashing does not stall other requests', async (t) => {
+  const { req } = await boot(t);
+  let done = 0;
+  const signups = Array.from({ length: 40 }, (_, i) =>
+    req('/signup', null, new URLSearchParams({ username: `user${i}`, password: 'password123' })).then(() => done++));
+  await new Promise((r) => setTimeout(r, 20));
+  const page = await req('/login');
+  const doneBeforePage = done;
+  await Promise.all(signups);
+  assert.equal(page.status, 200);
+  assert.ok(doneBeforePage < 20, `GET /login waited behind ${doneBeforePage} of 40 password hashes`);
+});

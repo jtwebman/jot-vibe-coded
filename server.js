@@ -1,7 +1,8 @@
 // Jot — notes app. Zero dependencies: node:http + node:sqlite + node:crypto.
 import http from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { randomBytes, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
+import { promisify } from 'node:util';
 
 const PORT = process.env.PORT || 3000;
 const db = new DatabaseSync(process.env.DB || 'data.db');
@@ -36,13 +37,15 @@ db.exec(`
 db.prepare('UPDATE users SET is_admin = (username = ?)').run(process.env.ADMIN ?? '');
 
 // ---------- security helpers ----------
-const hashPassword = (pw) => {
+// Async scrypt runs on the libuv thread pool, so hashing never blocks other requests.
+const scrypt = promisify(scryptCb);
+const hashPassword = async (pw) => {
   const salt = randomBytes(16);
-  return `${salt.toString('hex')}:${scryptSync(pw, salt, 64).toString('hex')}`;
+  return `${salt.toString('hex')}:${(await scrypt(pw, salt, 64)).toString('hex')}`;
 };
-const checkPassword = (pw, stored) => {
+const checkPassword = async (pw, stored) => {
   const [salt, hash] = stored.split(':');
-  return timingSafeEqual(scryptSync(pw, Buffer.from(salt, 'hex'), 64), Buffer.from(hash, 'hex'));
+  return timingSafeEqual(await scrypt(pw, Buffer.from(salt, 'hex'), 64), Buffer.from(hash, 'hex'));
 };
 const token = () => randomBytes(18).toString('base64url');
 
@@ -242,10 +245,11 @@ const routes = [
     const username = field(f, 'username'), password = String(f.get('password') ?? '');
     const error = !/^[A-Za-z0-9_]{3,20}$/.test(username) ? 'Username must be 3–20 letters, numbers or underscores.'
       : password.length < 8 || password.length > 200 ? 'Password must be 8–200 characters.'
-      : db.prepare('SELECT 1 FROM users WHERE username = ?').get(username) ? 'That username is taken.'
       : null;
     if (error) return send(res, authPage('signup', error, username), 400);
-    const { lastInsertRowid } = db.prepare('INSERT INTO users (username, password) VALUES (?, ?)').run(username, hashPassword(password));
+    const hash = await hashPassword(password); // before the taken check, so check and insert run with no await between them
+    if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(username)) return send(res, authPage('signup', 'That username is taken.', username), 400);
+    const { lastInsertRowid } = db.prepare('INSERT INTO users (username, password) VALUES (?, ?)').run(username, hash);
     startSession(res, lastInsertRowid);
   }],
 
@@ -256,7 +260,7 @@ const routes = [
     const f = await readForm(req);
     const username = field(f, 'username'), password = String(f.get('password') ?? '');
     const u = db.prepare('SELECT id, password FROM users WHERE username = ?').get(username);
-    if (!u || !checkPassword(password, u.password)) {
+    if (!u || !(await checkPassword(password, u.password))) {
       for (const [k, v] of loginFails) if (v.until <= now) loginFails.delete(k);
       loginFails.set(ip, { ...fails, count: fails.count + 1 });
       return send(res, authPage('login', 'Wrong username or password.', username), 401);
