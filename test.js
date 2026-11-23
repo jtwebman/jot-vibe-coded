@@ -145,3 +145,14 @@ test('#7 the server is not reachable from other machines', async (t) => {
   const reached = await new Promise((r) => { const s = net.connect(PORT, lan, () => { s.destroy(); r(true); }).on('error', () => r(false)); });
   assert.equal(reached, false, `connected to ${lan}:${PORT}`);
 });
+
+test('#8 an uploaded GIF/HTML polyglot can never run as a page', async (t) => {
+  const { req, signup } = await boot(t);
+  const bob = await signup('bob');
+  const f = new FormData();
+  f.append('avatar', new Blob(['GIF89a<html><script>alert(document.domain)</script></html>'], { type: 'text/html' }), 'x.gif');
+  assert.equal((await req('/profile', bob, f)).status, 303);
+  const served = await req('/avatar/1');
+  assert.equal(served.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(served.headers.get('content-security-policy') ?? '', /default-src 'none'.*sandbox/);
+});

@@ -330,7 +330,8 @@ const routes = [
   ['GET', /^\/avatar\/(\d+)$/, ({ res, params: [id] }) => {
     const a = db.prepare('SELECT avatar, avatar_type FROM users WHERE id = ? AND avatar IS NOT NULL').get(id);
     if (!a) throw httpError(404, 'No avatar.');
-    res.writeHead(200, { 'Content-Type': a.avatar_type, 'Cache-Control': 'no-cache' });
+    // Magic bytes don't rule out polyglots (GIF89a<script>…), so forbid script even if something renders this as a page.
+    res.writeHead(200, { 'Content-Type': a.avatar_type, 'Cache-Control': 'no-cache', 'Content-Security-Policy': "default-src 'none'; sandbox" });
     res.end(a.avatar);
   }],
 
