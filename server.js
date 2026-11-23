@@ -206,6 +206,11 @@ const send = (res, body, status = 200) => { res.writeHead(status, { 'Content-Typ
 const redirect = (res, to, headers = {}) => { res.writeHead(303, { Location: to, ...headers }); res.end(); };
 const field = (f, name) => String(f.get(name) ?? '').trim();
 
+// ---------- login throttling ----------
+// ponytail: in-memory and per IP, so it resets on restart and can't see one guesser spread over many IPs.
+const LOGIN_FAILS = 10, LOGIN_WINDOW_MS = 15 * 60_000;
+const loginFails = new Map(); // ip -> { count, until }
+
 // ---------- routes ----------
 const loggedIn = (fn) => (ctx) => ctx.user ? fn(ctx) : redirect(ctx.res, '/login');
 
@@ -245,11 +250,18 @@ const routes = [
   }],
 
   ['POST', /^\/login$/, async ({ req, res }) => {
+    const now = Date.now(), ip = req.socket.remoteAddress;
+    const fails = loginFails.get(ip)?.until > now ? loginFails.get(ip) : { count: 0, until: now + LOGIN_WINDOW_MS };
+    if (fails.count >= LOGIN_FAILS) throw httpError(429, 'Too many failed logins. Try again in 15 minutes.');
     const f = await readForm(req);
     const username = field(f, 'username'), password = String(f.get('password') ?? '');
     const u = db.prepare('SELECT id, password FROM users WHERE username = ?').get(username);
-    if (!u || !checkPassword(password, u.password)) return send(res, authPage('login', 'Wrong username or password.', username), 401);
-    startSession(res, u.id);
+    if (!u || !checkPassword(password, u.password)) {
+      for (const [k, v] of loginFails) if (v.until <= now) loginFails.delete(k);
+      loginFails.set(ip, { ...fails, count: fails.count + 1 });
+      return send(res, authPage('login', 'Wrong username or password.', username), 401);
+    }
+    startSession(res, u.id); // success does not reset the count, or guessers could interleave logins to their own account
   }],
 
   ['POST', /^\/logout$/, ({ req, res }) => {

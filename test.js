@@ -80,3 +80,10 @@ test('#2 signing up first does not make you admin; only ADMIN=<username> does', 
   assert.equal((await restarted.req('/admin', owner)).status, 200);
   assert.equal((await restarted.req('/admin', mallory)).status, 403);
 });
+
+test('#3 after 10 failed logins, even the right password is refused', async (t) => {
+  const { signup, login } = await boot(t);
+  await signup('bob');
+  for (let i = 0; i < 10; i++) assert.equal((await login('bob', `guess${i}`)).status, 401);
+  assert.equal((await login('bob', 'password123')).status, 429);
+});
