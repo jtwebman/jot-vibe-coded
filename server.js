@@ -377,4 +377,4 @@ http.createServer(async (req, res) => {
     if (!res.headersSent) send(res, errorPage(user, e.status || 500, e.status ? e.message : 'Something went wrong.'), e.status || 500);
     else res.end();
   }
-}).listen(PORT, () => console.log(`Jot running at http://localhost:${PORT}${process.env.ADMIN ? '' : ' (no admin: sign up, then restart with ADMIN=<username>)'}`));
+}).listen(PORT, '127.0.0.1', () => console.log(`Jot running at http://127.0.0.1:${PORT}${process.env.ADMIN ? '' : ' (no admin: sign up, then restart with ADMIN=<username>)'}`));

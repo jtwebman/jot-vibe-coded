@@ -6,7 +6,7 @@ import net from 'node:net';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
@@ -136,4 +136,12 @@ test('#6 a failed login takes as long for an unknown user as for a real one', as
   for (let i = 0; i < 5; i++) { real.push(await time('bob')); unknown.push(await time(`nobody${i}`)); } // 10 failures: the #3 limit
   const median = (a) => a.sort((x, y) => x - y)[2];
   assert.ok(median(unknown) > median(real) / 3, `unknown user ${median(unknown).toFixed(1)} ms vs real user ${median(real).toFixed(1)} ms`);
+});
+
+test('#7 the server is not reachable from other machines', async (t) => {
+  const lan = Object.values(networkInterfaces()).flat().find((i) => !i.internal && i.family === 'IPv4')?.address;
+  if (!lan) return t.skip('no non-loopback IPv4 interface to connect from');
+  const { PORT } = await boot(t);
+  const reached = await new Promise((r) => { const s = net.connect(PORT, lan, () => { s.destroy(); r(true); }).on('error', () => r(false)); });
+  assert.equal(reached, false, `connected to ${lan}:${PORT}`);
 });
