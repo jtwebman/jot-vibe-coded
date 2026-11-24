@@ -1,6 +1,6 @@
 # Jot: a vibe-coded app, attacked and fixed
 
-The demo app from the Max Tokens episode **"I Built an App in 4 Minutes. One Request Killed It."**
+The demo app from the Max Tokens episode **["Is Vibe Coding Production Ready? I Built an App to Find Out"](https://youtu.be/X7Jrpoz-qwc)**
 
 **The first commit** is the app exactly as an AI coding agent wrote it from this one prompt, with every change auto-accepted and nobody reading the code:
 
